@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: continuum-clan-wars
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: DATABASE_URL
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: ADSGRAM_SECRET
+        sync: false
+      - key: ADSGRAM_BLOCK_ID
+        value: "54936"
+      - key: ECPM_USD
+        value: "0"
+      - key: BOT_USERNAME
+        value: ContinuumCyberWars_bot
+      - key: APP_NAME
+        sync: false
+      - key: MIN_PAYOUT_USD
+        value: "100"
