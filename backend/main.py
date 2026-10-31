@@ -14,7 +14,8 @@ ADMINS = {int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isd
 SECRET = os.getenv("ADSGRAM_SECRET", "")    # Adsgram Reward URL'deki gizli anahtar
 ECPM = float(os.getenv("ECPM_USD", "0"))    # Adsgram panelindeki gerçek eCPM
 DEPOT = int(os.getenv("DEPOT_SECONDS", 4 * 3600))
-BOT, APP = os.getenv("BOT_USERNAME", "ContinuumCyberWars_bot"), os.getenv("APP_NAME", "play")
+BOT = (os.getenv("BOT_USERNAME") or "ContinuumCyberWars_bot").strip().lstrip("@")   # boş değer de varsayılana döner
+APP = (os.getenv("APP_NAME") or "play").strip().strip("/")
 RUN_SEC, MAXS = 60, 120   # tur süresi, saniyede en fazla makul skor
 EMAX, EREGEN = 5, 1200                      # enerji tavanı, 1 enerji = 20 dk
 MIN_PAY = float(os.getenv("MIN_PAYOUT_USD", "100"))
@@ -350,5 +351,6 @@ async def tg_webhook(req: Request, x_telegram_bot_api_secret_token: str = Header
         param = text.split(maxsplit=1)[1][:20] if len(text.split()) > 1 else ""
         if not re.fullmatch(r"[A-Za-z0-9_-]*", param): param = ""
         tg("sendMessage", chat_id=chat["id"], text="⚔️ Continuum Clan Wars\n\nDeponu doldur, 60 saniyelik turlarda çekirdeği koru, klanınla sıralamaya çık.",
-           reply_markup={"inline_keyboard": [[{"text": "⚔️ Oyunu aç", "url": open_link(param)}]]})
+           reply_markup={"inline_keyboard": [[{"text": "⚔️ Oyunu aç", "web_app": {"url": PUBLIC}} if not param
+                                              else {"text": "⚔️ Klana katıl ve oyna", "url": open_link(param)}]]})
     return {"ok": 1}
