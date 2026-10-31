@@ -63,6 +63,7 @@ input{width:100%;padding:12px;border-radius:12px;border:1px solid #8b5cf655;back
  <button data-v="clan"><i>🛡️</i>Klan</button>
 </nav>
 <div id="toast"></div>
+<div id="land" style="display:none;position:fixed;inset:0;z-index:90;align-items:center;justify-content:center;text-align:center;padding:28px;background:radial-gradient(circle at 50% 30%,#1d1560,#06070d 70%)"><div style="max-width:380px"><div style="font-size:64px">⚔️</div><h1 style="margin:10px 0 6px;font-size:30px">Continuum Clan Wars</h1><p class="mut" style="font-size:16px">Deponu doldur, 60 saniyelik turlarda çekirdeği koru, klanınla sıralamaya çık. Oyun Telegram içinde oynanır.</p><a class="btn gold" style="text-decoration:none" href="https://t.me/ContinuumCyberWars_bot/play">Telegram'da aç</a></div></div>
 <script>
 const tg=window.Telegram?.WebApp,$=id=>document.getElementById(id),sleep=ms=>new Promise(r=>setTimeout(r,ms));
 tg?.ready();tg?.expand();try{tg.disableVerticalSwipes();tg.setHeaderColor('#06070d');tg.setBackgroundColor('#06070d')}catch{}
@@ -209,5 +210,6 @@ let last=0;function tick(ts){const dt=Math.min(.05,(ts-last)/1000||0);last=ts;bg
  fctx.setTransform(dpr,0,0,dpr,0,0);fctx.clearRect(0,0,W,H);gfx.draw(fctx,dt*60);
  if(G.on){G.acc+=dt;while(G.acc>=1/60&&G.on){step(1/60);G.acc-=1/60}}if($('v-play').classList.contains('open')&&G.rnd)drawG();requestAnimationFrame(tick)}
 document.documentElement.style.setProperty('--st',(tg?.safeAreaInset?.top||0)+(tg?.contentSafeAreaInset?.top||0)+'px');
-(async()=>{try{setMe(await api('/api/me'))}catch(e){$('who').textContent='Telegram içinden aç';toast(e.message)}requestAnimationFrame(tick)})();
+if(!tg?.initData&&!['localhost','127.0.0.1'].includes(location.hostname)){$('land').style.display='flex'}
+(async()=>{if($('land').style.display=='flex')return;try{setMe(await api('/api/me'))}catch(e){$('who').textContent='Telegram içinden aç';toast(e.message)}requestAnimationFrame(tick)})();
 </script></body></html>
