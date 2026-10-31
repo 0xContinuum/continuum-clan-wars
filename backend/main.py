@@ -1,4 +1,4 @@
-import os, hmac, hashlib, json, time, threading, re, secrets
+import os, hmac, hashlib, json, time, threading, re, secrets, calendar
 from urllib.parse import parse_qsl
 import requests
 from fastapi import FastAPI, HTTPException, Header, Depends, Request
@@ -12,7 +12,6 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 DEV = os.getenv("DEV_MODE") == "1"          # yalnızca yerelde 1 yapın
 ADMINS = {int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()}
 SECRET = os.getenv("ADSGRAM_SECRET", "")    # Adsgram Reward URL'deki gizli anahtar
-ECPM = float(os.getenv("ECPM_USD", "0"))    # Adsgram panelindeki gerçek eCPM
 DEPOT = int(os.getenv("DEPOT_SECONDS", 4 * 3600))
 BOT = (os.getenv("BOT_USERNAME") or "ContinuumCyberWars_bot").strip().lstrip("@")   # boş değer de varsayılana döner
 APP = (os.getenv("APP_NAME") or "play").strip().strip("/")
@@ -70,11 +69,55 @@ class Payout(Base):
     tx = Column(String(80), nullable=True)
     t0 = Column(Float)
 
+class AdLog(Base):  # Adsgram sunucu bildirimiyle onaylanan her ödüllü reklam
+    __tablename__ = "adlog"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    day = Column(Integer, index=True)           # UTC gün numarası
+    clan = Column(String(20), nullable=True, index=True)
+    uid = Column(BigInteger)
+    t0 = Column(Float)
+
+class Day(Base):  # Adsgram panelinden elle girilen gerçek günlük rakamlar
+    __tablename__ = "days"
+    day = Column(Integer, primary_key=True)
+    imps = Column(Integer)
+    cpm = Column(Float)
+
 def paid(db, cid):  # reddedilmeyen tüm talepler düşülür
     return float(db.query(func.coalesce(func.sum(Payout.amount), 0)).filter(Payout.clan == cid, Payout.status != "rejected").scalar())
 
 def pending(db, cid):
     return float(db.query(func.coalesce(func.sum(Payout.amount), 0)).filter(Payout.clan == cid, Payout.status == "pending").scalar())
+
+def split_revenue(counts, real):
+    """counts: {gün: {klan|None: reklam_sayısı}}, real: {gün: (adsgram_gösterim, cpm)}
+    Yalnızca gerçek rakamı girilmiş günler sayılır. Günün gerçek kazancı, bizim kayıtlı reklam sayımıza göre
+    klanlara paylaştırılır; payda en az Adsgram gösterimi kadardır, bu yüzden toplam hiçbir zaman gerçek kazancı aşmaz.
+    Dönüş: {klan|None: [onaylı_reklam, gelir_usd]}"""
+    out = {}
+    for d, per in counts.items():
+        if d not in real: continue
+        imps, cpm = real[d]
+        den = max(imps, sum(per.values()))
+        if den <= 0: continue
+        earned = imps * cpm / 1000
+        for c, n in per.items():
+            a = out.setdefault(c, [0, 0.0]); a[0] += n; a[1] += earned * n / den
+    return out
+
+def stats(db):
+    counts = {}
+    for d, c, n in db.query(AdLog.day, AdLog.clan, func.count()).group_by(AdLog.day, AdLog.clan).all():
+        counts.setdefault(d, {})[c] = n
+    real = {x.day: (x.imps, x.cpm) for x in db.query(Day).all()}
+    return counts, real, split_revenue(counts, real)
+
+def clan_money(db, cid, counts, sp):
+    total = sum(per.get(cid, 0) for per in counts.values())
+    conf, rev = sp.get(cid, (0, 0.0))
+    share, pd, pn = rev * 0.25, paid(db, cid), pending(db, cid)   # pd: reddedilmeyenler (bekleyen dahil)
+    return {"ads": total, "confirmed": conf, "unconfirmed": total - conf, "revenue": round(rev, 4), "share": round(share, 4),
+            "paid": round(pd - pn, 4), "pending": round(pn, 4), "available": round(share - pd, 4)}
 
 Base.metadata.create_all(engine)
 app = FastAPI(title="Continuum Clan Wars", version="3.0")
@@ -204,6 +247,7 @@ def ad_reward(userid: int, secret: str = ""):
         if a:
             a.earned = True; u = db.get(User, userid)
             if u and u.clan: db.query(Clan).filter(Clan.id == u.clan).update({Clan.ads: Clan.ads + 1})
+            db.add(AdLog(day=today(), clan=u.clan if u else None, uid=userid, t0=time.time()))
             db.commit()
         return {"ok": 1}
     finally: db.close()
@@ -250,14 +294,11 @@ def leaderboard(db=Depends(get_db)):
 
 @app.get("/api/partner")
 def partner(db=Depends(get_db), u=Depends(cur)):
-    q = db.query(Clan) if u.id in ADMINS else db.query(Clan).filter(Clan.partner == u.id)
-    out = []
-    for c in q.all():
-        rev = round(c.ads * ECPM / 1000, 4)
-        avail = round(rev * 0.25 - paid(db, c.id), 4); pend = pending(db, c.id)
-        out.append({"id": c.id, "name": c.name, "partner": c.partner, "ads": c.ads, "revenue": rev,
-                    "share": round(rev * 0.25, 4), "link": invite(c.id), "min": MIN_PAY, "available": avail, "pending": pend,
-                    "members": db.query(User).filter(User.clan == c.id).count()})
+    counts, _, sp = stats(db); out = []
+    for c in db.query(Clan).filter(Clan.partner == u.id).all():
+        m = clan_money(db, c.id, counts, sp)
+        out.append({"id": c.id, "name": c.name, **m, "available": max(0.0, m["available"]), "link": invite(c.id),
+                    "min": MIN_PAY, "members": db.query(User).filter(User.clan == c.id).count()})
     return out
 
 class NewClan(BaseModel):
@@ -295,7 +336,8 @@ def payout_request(b: PayReq, db=Depends(get_db), u=Depends(cur)):
     if not c or c.partner != u.id: raise HTTPException(403, "Yetkisiz")
     if not re.fullmatch(r"0x[0-9a-fA-F]{40}", b.wallet): raise HTTPException(400, "Geçersiz cüzdan adresi")
     if pending(db, c.id) > 0: raise HTTPException(409, "Bekleyen bir talebin var")
-    av = round(c.ads * ECPM / 1000 * 0.25 - paid(db, c.id), 4)
+    counts, _, sp = stats(db)
+    av = round(max(0.0, clan_money(db, c.id, counts, sp)["available"]), 4)
     if av < MIN_PAY: raise HTTPException(400, f"En az {MIN_PAY} USD birikmeli")
     p = Payout(clan=c.id, partner=u.id, amount=av, wallet=b.wallet, t0=time.time()); db.add(p); db.commit()
     return {"ok": 1, "amount": av}
@@ -303,8 +345,48 @@ def payout_request(b: PayReq, db=Depends(get_db), u=Depends(cur)):
 @app.get("/api/admin/payouts")
 def admin_payouts(db=Depends(get_db), u=Depends(cur)):
     if u.id not in ADMINS: raise HTTPException(403, "Yetkisiz")
-    q = db.query(Payout).filter(Payout.status == "pending").order_by(Payout.id).all()
-    return [{"id": x.id, "clan": x.clan, "partner": x.partner, "amount": x.amount, "wallet": x.wallet} for x in q]
+    counts, _, sp = stats(db); out = []
+    for x in db.query(Payout).filter(Payout.status == "pending").order_by(Payout.id).all():
+        c = db.get(Clan, x.clan); m = clan_money(db, x.clan, counts, sp)
+        limit = round(m["share"] - m["paid"], 4)   # bu talebin en fazla olabileceği tutar (önceden ödenenler düşülmüş)
+        out.append({"id": x.id, "clan": x.clan, "name": c.name if c else x.clan, "partner": x.partner, "amount": x.amount,
+                    "wallet": x.wallet, "share": m["share"], "paid": m["paid"], "limit": limit,
+                    "ok": x.amount <= limit + 0.0001, "unconfirmed": m["unconfirmed"]})
+    return out
+
+@app.get("/api/admin/dashboard")
+def admin_dashboard(db=Depends(get_db), u=Depends(cur)):
+    if u.id not in ADMINS: raise HTTPException(403, "Yetkisiz")
+    counts, real, sp = stats(db)
+    clans = [{"id": c.id, "name": c.name, "partner": c.partner, **clan_money(db, c.id, counts, sp)}
+             for c in db.query(Clan).order_by(Clan.name).all()]
+    days = []
+    for d in sorted(set(counts) | set(real), reverse=True)[:21]:
+        r = real.get(d)
+        days.append({"date": time.strftime("%Y-%m-%d", time.gmtime(d * 86400)), "ours": sum(counts.get(d, {}).values()),
+                     "imps": r[0] if r else None, "cpm": r[1] if r else None, "earned": round(r[0] * r[1] / 1000, 4) if r else None})
+    return {"clans": clans, "days": days, "total_ads": sum(sum(p.values()) for p in counts.values()),
+            "no_clan_ads": sum(p.get(None, 0) for p in counts.values()),
+            "earned": round(sum(i * m / 1000 for i, m in real.values()), 4),
+            "owed": round(sum(c["share"] for c in clans), 4), "paid": round(sum(c["paid"] for c in clans), 4),
+            "pending": round(sum(c["pending"] for c in clans), 4), "today": time.strftime("%Y-%m-%d", time.gmtime())}
+
+class DayIn(BaseModel):
+    date: str
+    imps: int
+    cpm: float
+
+@app.post("/api/admin/day")
+def admin_day(b: DayIn, db=Depends(get_db), u=Depends(cur)):
+    if u.id not in ADMINS: raise HTTPException(403, "Yetkisiz")
+    try: d = calendar.timegm(time.strptime(b.date, "%Y-%m-%d")) // 86400
+    except ValueError: raise HTTPException(400, "Tarih YYYY-AA-GG biçiminde olmalı")
+    if d >= today(): raise HTTPException(400, "Gün bitmeden onaylanamaz, dünü ve öncesini gir")
+    if not (0 <= b.imps <= 10_000_000) or not (0 <= b.cpm <= 100): raise HTTPException(400, "Değerler geçersiz")
+    r = db.get(Day, d)
+    if r: r.imps, r.cpm = b.imps, b.cpm
+    else: db.add(Day(day=d, imps=b.imps, cpm=b.cpm))
+    db.commit(); return {"ok": 1}
 
 class PayDone(BaseModel):
     id: int
