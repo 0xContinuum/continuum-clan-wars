@@ -10,7 +10,7 @@
 html,body{margin:0;height:100%;background:var(--bg);color:var(--t);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
 canvas{display:block}
 #bg,#fx{position:fixed;inset:0;width:100%;height:100%}#bg{z-index:0}#fx{z-index:30;pointer-events:none}
-header{position:fixed;top:0;left:0;right:0;z-index:5;padding:calc(env(safe-area-inset-top) + 8px) 14px 8px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+header{position:fixed;top:0;left:0;right:0;z-index:5;background:linear-gradient(#06070d 55%,#06070d00);padding:calc(env(safe-area-inset-top) + 8px) 14px 8px;display:flex;justify-content:space-between;align-items:center;gap:8px}
 .pill{background:var(--card);border:1px solid #8b5cf644;border-radius:99px;padding:7px 14px;font-weight:800;backdrop-filter:blur(12px);max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #pts{color:var(--g);font-variant-numeric:tabular-nums}
 main{position:fixed;inset:0;z-index:1;padding:calc(env(safe-area-inset-top) + 58px) 14px calc(env(safe-area-inset-bottom) + 120px);overflow-y:auto}
@@ -54,6 +54,7 @@ input{width:100%;padding:12px;border-radius:12px;border:1px solid #8b5cf655;back
 </section>
 <section class="view" id="v-rank"><div class="tabs"><button class="on" data-a="tu">Bugün</button><button data-a="tc">Klanlar</button></div><div class="card" id="rk"></div></section>
 <section class="view" id="v-clan"></section>
+<section class="view" id="v-admin"></section>
 </main>
 <div id="v-play"><canvas id="g"></canvas><button id="x" data-a="close">✕</button><div id="ov"></div></div>
 <nav>
@@ -61,6 +62,7 @@ input{width:100%;padding:12px;border-radius:12px;border:1px solid #8b5cf655;back
  <button class="play" data-a="play"><i>⚔️</i>Oyna</button>
  <button data-v="rank"><i>🏆</i>Sıralama</button>
  <button data-v="clan"><i>🛡️</i>Klan</button>
+ <button data-v="admin" id="nav-admin" style="display:none"><i>📊</i>Yönetim</button>
 </nav>
 <div id="toast"></div>
 <div id="land" style="display:none;position:fixed;inset:0;z-index:90;align-items:center;justify-content:center;text-align:center;padding:28px;background:radial-gradient(circle at 50% 30%,#1d1560,#06070d 70%)"><div style="max-width:380px"><div style="font-size:64px">⚔️</div><h1 style="margin:10px 0 6px;font-size:30px">Continuum Clan Wars</h1><p class="mut" style="font-size:16px">Deponu doldur, 60 saniyelik turlarda çekirdeği koru, klanınla sıralamaya çık. Oyun Telegram içinde oynanır.</p><a class="btn gold" style="text-decoration:none" href="https://t.me/ContinuumCyberWars_bot/play">Telegram'da aç</a></div></div>
@@ -77,7 +79,7 @@ async function api(p,o={}){const r=await fetch(p,{method:o.method||'GET',headers
  const j=await r.json().catch(()=>({}));if(!r.ok){const e=Error(typeof j.detail=='string'?j.detail:'İstek başarısız');e.status=r.status;throw e}return j}
 const nowS=()=>(Date.now()+skew)/1000;
 let shown=0;function setPts(v){const s=shown,t0=performance.now();(function f(n){const k=Math.min(1,(n-t0)/700);shown=Math.round(s+(v-s)*k);$('pts').textContent=shown.toLocaleString('tr-TR');if(k<1)requestAnimationFrame(f)})(t0)}
-function setMe(m){ME=m;ME.enAt=Date.now()/1000+m.enext;skew=m.now*1000-Date.now();setPts(m.pts);$('who').textContent=m.name;$('lv').textContent=m.level;$('bs').textContent=m.best;
+function setMe(m){ME=m;$("nav-admin").style.display=m.is_admin?"":"none";ME.enAt=Date.now()/1000+m.enext;skew=m.now*1000-Date.now();setPts(m.pts);$('who').textContent=m.name;$('lv').textContent=m.level;$('bs').textContent=m.best;
  $('upt').textContent=`Seviye ${m.level} → ${m.level+1}: depo ödülü ${m.reward} → ${m.reward+300} PTS`;$('upb').textContent=`Yükselt · ${m.cost} PTS`;depotUI(true);energyTick()}
 
 /* ——— parçacıklar ——— */
@@ -179,27 +181,38 @@ async function loadRank(){LB=await api('/api/leaderboard');drawRank()}
 function drawRank(){document.querySelectorAll('.tabs button').forEach((b,i)=>b.classList.toggle('on',(i==0)==(lt=='u')));
  $('rk').innerHTML=(lt=='u'?LB.users.map((x,i)=>row(i,x.n,x.s)):LB.clans.map((x,i)=>row(i,x.n,x.p+' PTS · '+x.m+' üye'))).join('')||'<p class="mut">Henüz kimse yok. İlk turu sen oyna.</p>'}
 async function loadClan(){const c=ME.clan;let h=`<div class="card"><h3>🛡️ ${c?esc(c.name):'Henüz klanın yok'}</h3>`+(c?`<p class="mut">Davet linkin. Arkadaşların katılınca klan puanı hızlanır.</p><input readonly value="${esc(c.link)}"><button class="btn" data-a="share">Arkadaşlarını davet et</button>`:'<p class="mut">Bir kanalın klan davet linkiyle açarsan otomatik katılırsın.</p>')+`<p class="mut">Telegram ID: ${ME.id}</p></div>`;
- try{const P=await api('/api/partner');for(const p of P)h+=`<div class="card"><h3>📊 ${esc(p.name)}</h3><div class="row"><span>Üye</span><i>${p.members}</i></div><div class="row"><span>Onaylı reklam</span><i>${p.ads}</i></div><div class="row"><span>Tahmini gelir</span><i>${p.revenue} USD</i></div><div class="row"><span>Senin %25 payın (tahmini)</span><i>${p.share} USD</i></div><p class="mut">Rakamlar Adsgram panelindeki eCPM'e göre tahmindir; ödeme için panelle karşılaştırılır.</p><div class="row"><span>Çekilebilir</span><i>${p.available} USD</i></div>${p.pending?`<p class="mut">Bekleyen talep: ${p.pending} USD</p>`:''}<input id="pw-${p.id}" placeholder="USDT ödeme cüzdanı (0x…)"><button class="btn gold" data-a="pay" data-c="${esc(p.id)}" ${p.available<p.min||p.pending?'disabled':''}>Ödeme talep et · en az ${p.min} USD</button><input readonly value="${esc(p.link)}"></div>`}catch{}
- if(ME.is_admin){try{const Q=await api('/api/admin/payouts');if(Q.length)h+='<div class="card"><h3>Bekleyen ödemeler</h3>'+Q.map(x=>`<div class="row"><span>${esc(x.clan)} · ${x.amount} USD<br><small class="mut">${esc(x.wallet)}</small></span></div><input id="tx-${x.id}" placeholder="İşlem hash'i"><button class="btn" data-a="pd" data-i="${x.id}">Ödendi</button><button class="btn dim" data-a="pr" data-i="${x.id}">Reddet</button>`).join('')+'</div>'}catch{}}
- if(ME.is_admin)h+=`<div class="card"><h3>Yeni klan oluştur</h3><input id="cn" placeholder="Klan adı"><input id="cp" inputmode="numeric" placeholder="Partner Telegram ID"><button class="btn" data-a="mk">Oluştur</button></div>`;
+ try{const P=await api('/api/partner');for(const p of P)h+=`<div class="card"><h3>📊 ${esc(p.name)}</h3><div class="row"><span>Üye</span><i>${p.members}</i></div><div class="row"><span>Toplam reklam</span><i>${p.ads}</i></div><div class="row"><span>Onaylanan gelir</span><i>${p.revenue} USD</i></div><div class="row"><span>Senin %25 payın</span><i>${p.share} USD</i></div>${p.unconfirmed?`<p class="mut">${p.unconfirmed} reklamın geliri, Adsgram'ın günlük rakamlarıyla onaylanınca eklenecek.</p>`:''}<div class="row"><span>Çekilebilir</span><i>${p.available} USD</i></div>${p.pending?`<p class="mut">Bekleyen talep: ${p.pending} USD</p>`:''}<input id="pw-${p.id}" placeholder="USDT ödeme cüzdanı (0x…)"><button class="btn gold" data-a="pay" data-c="${esc(p.id)}" ${p.available<p.min||p.pending?'disabled':''}>Ödeme talep et · en az ${p.min} USD</button><input readonly value="${esc(p.link)}"></div>`}catch{}
  h+=`<div class="card"><h3>💎 Cüzdan</h3><p class="mut">Mainnet ödülleri için EVM adresin.</p><input id="wa" value="${esc(ME.wallet||'')}" placeholder="0x…"><button class="btn dim" data-a="wal">Cüzdanı kaydet</button></div>`;$('v-clan').innerHTML=h}
 
+/* ——— yönetim paneli (yalnızca ADMIN_IDS) ——— */
+const money=n=>(+n).toFixed(4),rw=(a,b)=>`<div class="row"><span>${a}</span><i>${b}</i></div>`;
+async function loadAdmin(){const [D,Q]=await Promise.all([api('/api/admin/dashboard'),api('/api/admin/payouts')]);
+ let h=`<div class="card"><h3>📊 Özet</h3>${rw('Onaylanan reklam (toplam)',D.total_ads)}${rw('Girdiğin Adsgram kazancı',money(D.earned)+' USD')}${rw('Ortaklara ayrılan %25',money(D.owed)+' USD')}${rw('Ödenen',money(D.paid)+' USD')}${rw('Bekleyen talepler',money(D.pending)+' USD')}${D.no_clan_ads?`<p class="mut">Klansız oyuncuların ${D.no_clan_ads} reklamı ortak payına dahil edilmez.</p>`:''}</div>`;
+ if(Q.length)h+='<div class="card"><h3>Bekleyen ödemeler</h3>'+Q.map(x=>`<div style="padding:8px 0"><b>${esc(x.name)}</b> · ${money(x.amount)} USD ${x.ok?'✅':'⚠️'}<br><small class="mut">Hak edilen ${money(x.share)} − ödenen ${money(x.paid)} = en fazla ${money(x.limit)} USD${x.ok?'':' · talep bu sınırı aşıyor'}${x.unconfirmed?` · onay bekleyen ${x.unconfirmed} reklam`:''}</small><br><small class="mut" style="user-select:text;word-break:break-all">${esc(x.wallet)}</small></div><input id="tx-${x.id}" placeholder="İşlem hash'i"><button class="btn" data-a="pd" data-i="${x.id}">Ödendi</button><button class="btn dim" data-a="pr" data-i="${x.id}">Reddet</button>`).join('')+'</div>';
+ h+='<div class="card"><h3>Klan bazında gelir</h3>'+(D.clans.map(c=>`<div style="padding:8px 0;border-bottom:1px solid #ffffff10"><b>${esc(c.name)}</b> <small class="mut">· ortak ${c.partner}</small>${rw('Reklam (onaylı / bekleyen)',c.confirmed+' / '+c.unconfirmed)}${rw('Onaylanan gelir',money(c.revenue)+' USD')}${rw('%25 pay',money(c.share)+' USD')}${rw('Ödenen / bekleyen',money(c.paid)+' / '+money(c.pending))}${rw('Çekilebilir',money(Math.max(0,c.available))+' USD')}</div>`).join('')||'<p class="mut">Henüz klan yok.</p>')+'</div>';
+ const open=[...D.days].reverse().find(d=>d.imps==null&&d.date<D.today);
+ h+=`<div class="card"><h3>Günlük mutabakat</h3><p class="mut">Adsgram panelindeki Impressions ve CPM değerlerini gir. Gün onaylanınca o günün geliri klanlara paylaştırılır. Günler UTC'dir.</p>`+(D.days.map(d=>`<div class="row"><span style="white-space:normal">${esc(d.date)}<br><small class="mut">bizde ${d.ours} · Adsgram ${d.imps==null?'—':d.imps}${d.cpm==null?'':' · CPM '+d.cpm}</small></span><i>${d.imps==null?'onay bekliyor':(d.ours>d.imps?'⚠️ ':'')+money(d.earned)+' USD'}</i></div>`).join('')||'<p class="mut">Henüz onaylı reklam yok.</p>')+`<input id="dd" value="${open?esc(open.date):''}" placeholder="Tarih (YYYY-AA-GG)"><input id="di" inputmode="numeric" placeholder="Adsgram Impressions"><input id="dc" inputmode="decimal" placeholder="CPM (örn. 2.02)"><button class="btn" data-a="day">Günü onayla</button></div>`;
+ h+=`<div class="card"><h3>Yeni klan oluştur</h3><input id="cn" placeholder="Klan adı"><input id="cp" inputmode="numeric" placeholder="Partner Telegram ID"><button class="btn dim" data-a="mk">Oluştur</button></div>`;
+ $('v-admin').innerHTML=h}
+
 /* ——— eylemler ——— */
-function go(v){view=v;document.querySelectorAll('.view').forEach(e=>e.classList.toggle('on',e.id=='v-'+v));document.querySelectorAll('nav [data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v==v));if(v=='rank')loadRank().catch(e=>toast(e.message));if(v=='clan')loadClan();buzz()}
+function go(v){view=v;document.querySelectorAll('.view').forEach(e=>e.classList.toggle('on',e.id=='v-'+v));document.querySelectorAll('nav [data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v==v));if(v=='rank')loadRank().catch(e=>toast(e.message));if(v=='clan')loadClan();if(v=='admin')loadAdmin().catch(e=>toast(e.message));buzz()}
 const A={
  play:openPlay,begin,close:closePlay,save:()=>save(false),save2:()=>save(true),
  tu:()=>{lt='u';drawRank()},tc:()=>{lt='c';drawRank()},
  mute(){SND.on=!SND.on;try{localStorage.setItem('snd',SND.on?1:0)}catch{}$('snd').textContent=SND.on?'🔊':'🔇';SND.init()},
  async refill(){setMe(await withAd('energy','/api/energy/refill',{},false));toast('Enerji doldu');openPlay()},
  async pay(b){const id=b.dataset.c;await api('/api/payout/request',{method:'POST',body:{clan:id,wallet:$('pw-'+id).value.trim()}});toast('Talep admin onayına gönderildi');loadClan()},
- async pd(b){const i=b.dataset.i;await api('/api/admin/payout',{method:'POST',body:{id:+i,ok:true,tx:$('tx-'+i).value.trim()}});toast('Ödendi olarak işaretlendi');loadClan()},
- async pr(b){await api('/api/admin/payout',{method:'POST',body:{id:+b.dataset.i,ok:false}});toast('Talep reddedildi');loadClan()},
+ async pd(b){const i=b.dataset.i;await api('/api/admin/payout',{method:'POST',body:{id:+i,ok:true,tx:$('tx-'+i).value.trim()}});toast('Ödendi olarak işaretlendi');loadAdmin()},
+ async pr(b){await api('/api/admin/payout',{method:'POST',body:{id:+b.dataset.i,ok:false}});toast('Talep reddedildi');loadAdmin()},
  async dstart(){setMe(await api('/api/depot/start',{method:'POST'}));buzz('ok')},
  async claim(){const r=await api('/api/depot/claim',{method:'POST',body:{}});gotDepot(r)},
  async claim2(){gotDepot(await withAd('depot2x','/api/depot/claim',{}))},
  async up(){const r=await api('/api/upgrade',{method:'POST'});setMe(r);gfx.burst(W/2,H*.4,50,'#8b5cf6',7);buzz('ok');SND.up();toast('Üretim seviyesi '+r.level)},
  share(){const l=ME.clan.link;tg?tg.openTelegramLink('https://t.me/share/url?url='+encodeURIComponent(l)+'&text='+encodeURIComponent('Klanıma katıl, Continuum Clan Wars!')):navigator.clipboard?.writeText(l);toast('Davet hazır')},
- async mk(){const r=await api('/api/admin/clan',{method:'POST',body:{name:$('cn').value,partner:+$('cp').value}});toast('Klan oluşturuldu: '+r.link);loadClan()},
+ async mk(){const r=await api('/api/admin/clan',{method:'POST',body:{name:$('cn').value,partner:+$('cp').value}});toast('Klan oluşturuldu: '+r.link);loadAdmin()},
+ async day(){const i=parseInt($('di').value,10),c=parseFloat($('dc').value.replace(',','.'));if(isNaN(i)||isNaN(c))throw Error('Impressions ve CPM sayı olmalı');
+  await api('/api/admin/day',{method:'POST',body:{date:$('dd').value.trim(),imps:i,cpm:c}});toast('Gün onaylandı');loadAdmin()},
  async wal(){await api('/api/wallet',{method:'POST',body:{address:$('wa').value.trim()}});toast('Cüzdan kaydedildi')}};
 function gotDepot(r){const o=$('reactor').getBoundingClientRect();gfx.burst(o.left+o.width/2,o.top+150,90,'#ffb627',9);gfx.burst(o.left+o.width/2,o.top+150,40,'#2de2e6',6);buzz('ok');SND.coin();$('reactor').classList.remove('shake');void $('reactor').offsetWidth;$('reactor').classList.add('shake');setMe(r);toast('+'+r.gain+' PTS toplandı')}
 document.addEventListener('click',async e=>{const v=e.target.closest('[data-v]');if(v)return go(v.dataset.v);const b=e.target.closest('[data-a]');if(!b)return;b.disabled=true;
