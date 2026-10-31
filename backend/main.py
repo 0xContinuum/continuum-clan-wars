@@ -1,7 +1,7 @@
 import os, hmac, hashlib, json, time, threading, re, secrets
 from urllib.parse import parse_qsl
 import requests
-from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -14,10 +14,10 @@ ADMINS = {int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isd
 SECRET = os.getenv("ADSGRAM_SECRET", "")    # Adsgram Reward URL'deki gizli anahtar
 ECPM = float(os.getenv("ECPM_USD", "0"))    # Adsgram panelindeki gerçek eCPM
 DEPOT = int(os.getenv("DEPOT_SECONDS", 4 * 3600))
-BOT, APP = os.getenv("BOT_USERNAME", "ContinuumCyberWars_bot"), os.getenv("APP_NAME", "")
-RUN_SEC, MAXS = 60, 120
+BOT, APP = os.getenv("BOT_USERNAME", "ContinuumCyberWars_bot"), os.getenv("APP_NAME", "play")
+RUN_SEC, MAXS = 60, 120   # tur süresi, saniyede en fazla makul skor
 EMAX, EREGEN = 5, 1200                      # enerji tavanı, 1 enerji = 20 dk
-MIN_PAY = float(os.getenv("MIN_PAYOUT_USD", "100"))                     # tur süresi, saniyede en fazla makul skor
+MIN_PAY = float(os.getenv("MIN_PAYOUT_USD", "100"))
 
 class User(Base):
     __tablename__ = "users"
@@ -316,4 +316,39 @@ def admin_payout(b: PayDone, db=Depends(get_db), u=Depends(cur)):
     p = db.get(Payout, b.id)
     if not p or p.status != "pending": raise HTTPException(400, "Talep bulunamadı")
     p.status = "paid" if b.ok else "rejected"; p.tx = b.tx[:80]; db.commit()
+    return {"ok": 1}
+
+# ——— Telegram bot (webhook): /start'a yanıt verir, Adsgram moderasyonu "bot çalışıyor mu" diye bakar ———
+PUBLIC = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
+WH_SECRET = hashlib.sha256(("wh:" + BOT_TOKEN).encode()).hexdigest()   # ayrı ortam değişkeni gerekmez
+
+def tg(method, **data):
+    if not BOT_TOKEN: return {}
+    try: return requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/{method}", json=data, timeout=10).json()
+    except Exception: return {}
+
+def open_link(param=""):
+    base = f"https://t.me/{BOT}/{APP}" if APP else f"https://t.me/{BOT}"
+    return base + (f"?startapp={param}" if param else "")
+
+def setup_bot():
+    time.sleep(3)
+    if not (BOT_TOKEN and PUBLIC): return
+    tg("setWebhook", url=f"{PUBLIC}/tg/webhook", secret_token=WH_SECRET, allowed_updates=["message"])
+    tg("setMyCommands", commands=[{"command": "start", "description": "Oyunu aç"}])
+    tg("setChatMenuButton", menu_button={"type": "web_app", "text": "Oyna", "web_app": {"url": PUBLIC}})
+threading.Thread(target=setup_bot, daemon=True).start()
+
+@app.post("/tg/webhook")
+async def tg_webhook(req: Request, x_telegram_bot_api_secret_token: str = Header("")):
+    if not BOT_TOKEN or not hmac.compare_digest(x_telegram_bot_api_secret_token, WH_SECRET):
+        raise HTTPException(403, "Yetkisiz")
+    try: m = (await req.json()).get("message") or {}
+    except Exception: return {"ok": 1}
+    chat, text = m.get("chat") or {}, (m.get("text") or "").strip()
+    if chat.get("type") == "private" and text.startswith("/start"):
+        param = text.split(maxsplit=1)[1][:20] if len(text.split()) > 1 else ""
+        if not re.fullmatch(r"[A-Za-z0-9_-]*", param): param = ""
+        tg("sendMessage", chat_id=chat["id"], text="⚔️ Continuum Clan Wars\n\nDeponu doldur, 60 saniyelik turlarda çekirdeği koru, klanınla sıralamaya çık.",
+           reply_markup={"inline_keyboard": [[{"text": "⚔️ Oyunu aç", "url": open_link(param)}]]})
     return {"ok": 1}
